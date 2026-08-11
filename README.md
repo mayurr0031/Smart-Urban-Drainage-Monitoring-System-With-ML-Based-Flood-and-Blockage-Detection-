@@ -225,4 +225,4 @@ The UI shows:
 
 ## License
 
-This repository does not include an explicit license file. Add a license if you plan to share or publish the project.
+This repository does not include an explicit license file. Add a license if you plan to share or publish the project..
