@@ -65,12 +65,12 @@ if __name__ == '__main__':
     send(2, 19.8, 0.05, 19.8)
 
     print("\n[2] Simulating BLOCKAGE (large diff)...")
-    send(1, 38.0, 2.5, 38.0)
+    send(1, 35.0, 2.5, 2.0)
     send(2,  5.0, 0.1,  5.0)
     test_prediction()
 
     print("\n[3] Simulating FLOOD (both high)...")
-    send(1, 42.0, 1.8, 42.0)
+    send(1, 38.0, 1.8, 38.0)
     send(2, 38.0, 1.5, 38.0)
     test_prediction()
 

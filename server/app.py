@@ -282,7 +282,20 @@ def create_app() -> Flask:
                         (hours,),
                     )
                 rows = [serialize_row(row) for row in cursor.fetchall()]
-                return jsonify({"status": "ok", "count": len(rows), "data": rows}), 200
+                cursor.execute(
+                    "SELECT condition_label, ml_label, flood_probability, blockage_probability, "
+                    "normal_probability, timestamp FROM predictions "
+                    "WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR) ORDER BY timestamp ASC",
+                    (hours,),
+                )
+                predictions = [serialize_row(row) for row in cursor.fetchall()]
+                return jsonify({
+                    "status": "ok",
+                    "count": len(rows),
+                    "data": rows,
+                    "predictions": predictions,
+                    "last_prediction": predictions[-1] if predictions else None,
+                }), 200
             except Exception as exc:
                 log.error(f"get_history: {exc}")
                 return jsonify({"error": "DB error"}), 500
