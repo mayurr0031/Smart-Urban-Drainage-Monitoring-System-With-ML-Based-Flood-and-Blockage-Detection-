@@ -166,25 +166,47 @@ def create_app() -> Flask:
                 _use_db(cursor)
 
                 def latest_device(device_id):
-                    cursor.execute(
-                        "SELECT device_id, water_level, rise_rate, percentage, mq4_1, mq4_status_1, mq135_1, mq135_status_1, mq4_2, mq4_status_2, mq135_2, mq135_status_2, timestamp "
-                        "FROM sensor_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
-                        (device_id,),
-                    )
+                    if device_id == 1:
+                        cursor.execute(
+                            "SELECT device_id, water_level, rise_rate, percentage, mq4_1, mq4_status_1, mq135_1, mq135_status_1, timestamp "
+                            "FROM sensor_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
+                            (device_id,),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT device_id, water_level, rise_rate, percentage, mq4_2, mq4_status_2, mq135_2, mq135_status_2, timestamp "
+                            "FROM sensor_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
+                            (device_id,),
+                        )
+
                     row = serialize_row(cursor.fetchone())
                     if not row:
                         return None
+
                     if device_id == 1:
-                        row["mq4"] = row.get("mq4_1", 0)
-                        row["mq4_status"] = row.get("mq4_status_1", "NORMAL")
-                        row["mq135"] = row.get("mq135_1", 0)
-                        row["mq135_status"] = row.get("mq135_status_1", "NORMAL")
-                    else:
-                        row["mq4"] = row.get("mq4_2", 0)
-                        row["mq4_status"] = row.get("mq4_status_2", "NORMAL")
-                        row["mq135"] = row.get("mq135_2", 0)
-                        row["mq135_status"] = row.get("mq135_status_2", "NORMAL")
-                    return row
+                        return {
+                            "device_id": row["device_id"],
+                            "water_level": row["water_level"],
+                            "rise_rate": row["rise_rate"],
+                            "percentage": row["percentage"],
+                            "mq4": row.get("mq4_1", 0),
+                            "mq4_status": row.get("mq4_status_1", "NORMAL"),
+                            "mq135": row.get("mq135_1", 0),
+                            "mq135_status": row.get("mq135_status_1", "NORMAL"),
+                            "timestamp": row["timestamp"],
+                        }
+
+                    return {
+                        "device_id": row["device_id"],
+                        "water_level": row["water_level"],
+                        "rise_rate": row["rise_rate"],
+                        "percentage": row["percentage"],
+                        "mq4": row.get("mq4_2", 0),
+                        "mq4_status": row.get("mq4_status_2", "NORMAL"),
+                        "mq135": row.get("mq135_2", 0),
+                        "mq135_status": row.get("mq135_status_2", "NORMAL"),
+                        "timestamp": row["timestamp"],
+                    }
 
                 d1 = latest_device(1)
                 d2 = latest_device(2)
