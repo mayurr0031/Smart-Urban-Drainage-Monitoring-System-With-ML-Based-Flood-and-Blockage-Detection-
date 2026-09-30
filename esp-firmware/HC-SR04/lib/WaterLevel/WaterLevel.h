@@ -9,7 +9,7 @@ private:
     int echoPin;
     float baseHeight;  // cm - distance from sensor to container bottom
     float previousDistance;
-    float riseRate;    // cm/s
+    float riseRate;    // cm/min
     unsigned long lastMeasureTime;
      float currentWaterLevel;
     
@@ -26,7 +26,7 @@ public:
     // Get current water level (cm from bottom)
     float getWaterLevel();
     
-    // Get rise rate (cm/s)
+    // Get rise rate (cm/min)
     float getRiseRate();
     
     // Get percentage of container filled (0-100%)

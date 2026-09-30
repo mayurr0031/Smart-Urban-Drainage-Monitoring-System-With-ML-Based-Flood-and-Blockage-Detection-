@@ -129,10 +129,14 @@ The ESP32 sends sensor readings in this format:
 {
   "device_id": 1,
   "water_level": 12.50,
-  "rise_rate": 0.0312,
-  "percentage": 31.25
+  "rise_rate": 1.8720,
+  "percentage": 31.25,
+  "rain_intensity": 2.10
 }
 ```
+
+The ESP32 posts once per minute. `rise_rate` is in cm/min and device 1's
+`rain_intensity` is sent to the ML model as `precipitationIntensity`.
 
 ## Model Training
 

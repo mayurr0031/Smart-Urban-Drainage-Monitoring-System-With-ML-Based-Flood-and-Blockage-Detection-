@@ -32,16 +32,22 @@ def create_app() -> Flask:
             return jsonify({"error": "No JSON body"}), 400
 
         device_id = data.get("device_id")
+        cover_status = str(data.get("manhole_cover_status", "CLOSED")).upper()
         water_level = data.get("water_level")
         rise_rate = data.get("rise_rate", 0.0)
         percentage = data.get("percentage", 0.0)
+        rain_intensity = data.get("rain_intensity", 0.0)
         mq4_ppm = data.get("mq4_ppm", 0.0)
         mq4_status = data.get("mq4_status", "NORMAL")
         mq135_ppm = data.get("mq135_ppm", 0.0)
         mq135_status = data.get("mq135_status", "NORMAL")
 
-        if device_id is None or water_level is None:
-            return jsonify({"error": "Missing device_id or water_level"}), 400
+        if device_id is None:
+            return jsonify({"error": "Missing device_id"}), 400
+        if cover_status not in ("OPEN", "CLOSED"):
+            return jsonify({"error": "manhole_cover_status must be OPEN or CLOSED"}), 400
+        if cover_status == "CLOSED" and water_level is None:
+            return jsonify({"error": "Missing water_level for closed manhole cover"}), 400
 
         mq4_1 = mq135_1 = mq4_2 = mq135_2 = 0.0
         mq4_status_1 = mq135_status_1 = mq4_status_2 = mq135_status_2 = "NORMAL"
@@ -67,22 +73,34 @@ def create_app() -> Flask:
 
                 _use_db(cursor)
                 cursor.execute(
-                    "INSERT INTO sensor_readings (device_id, water_level, rise_rate, percentage, mq4_1, mq4_status_1, mq135_1, mq135_status_1, mq4_2, mq4_status_2, mq135_2, mq135_status_2) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (
-                        int(device_id),
-                        float(water_level),
-                        float(rise_rate),
-                        float(percentage),
-                        mq4_1,
-                        mq4_status_1,
-                        mq135_1,
-                        mq135_status_1,
-                        mq4_2,
-                        mq4_status_2,
-                        mq135_2,
-                        mq135_status_2,
-                    ),
+                    "INSERT INTO manhole_cover_status (device_id, status) VALUES (%s, %s) "
+                    "ON DUPLICATE KEY UPDATE status=VALUES(status), updated_at=CURRENT_TIMESTAMP",
+                    (int(device_id), cover_status),
                 )
+                cursor.execute(
+                    "INSERT INTO gas_readings (device_id, mq4_ppm, mq4_status, mq135_ppm, mq135_status) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (int(device_id), float(mq4_ppm), str(mq4_status), float(mq135_ppm), str(mq135_status)),
+                )
+                if water_level is not None:
+                    cursor.execute(
+                        "INSERT INTO sensor_readings (device_id, water_level, rise_rate, percentage, rain_intensity, mq4_1, mq4_status_1, mq135_1, mq135_status_1, mq4_2, mq4_status_2, mq135_2, mq135_status_2) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            int(device_id),
+                            float(water_level),
+                            float(rise_rate),
+                            float(percentage),
+                            float(rain_intensity),
+                            mq4_1,
+                            mq4_status_1,
+                            mq135_1,
+                            mq135_status_1,
+                            mq4_2,
+                            mq4_status_2,
+                            mq135_2,
+                            mq135_status_2,
+                        ),
+                    )
                 conn.commit()
             except Exception as exc:
                 log.error(f"receive_water_level DB error: {exc}")
@@ -91,10 +109,13 @@ def create_app() -> Flask:
                 cursor.close()
                 conn.close()
 
-        log.info(f"Device {device_id} → level={water_level:.2f}cm rate={rise_rate:.4f}cm/s pct={percentage:.1f}%")
-        _run_prediction_async()
+        if water_level is not None:
+            log.info(f"Device {device_id} cover={cover_status} → level={water_level:.2f}cm rate={rise_rate:.4f}cm/min pct={percentage:.1f}% rain={rain_intensity:.2f}mm/h")
+            _run_prediction_async()
+        else:
+            log.info(f"Device {device_id} cover={cover_status}; no water-level reading, prediction skipped")
 
-        return jsonify({"status": "ok", "device_id": device_id}), 200
+        return jsonify({"status": "ok", "device_id": device_id, "manhole_cover_status": cover_status}), 200
 
     def _run_prediction_async():
         """Fetch both devices and compute/store a prediction after each insert."""
@@ -108,12 +129,12 @@ def create_app() -> Flask:
 
                 _use_db(cursor)
                 cursor.execute(
-                    "SELECT water_level, rise_rate, timestamp FROM sensor_readings "
+                    "SELECT water_level, rise_rate, rain_intensity, timestamp FROM sensor_readings "
                     "WHERE device_id=1 ORDER BY timestamp DESC LIMIT 1"
                 )
                 d1 = cursor.fetchone()
                 cursor.execute(
-                    "SELECT water_level, rise_rate, timestamp FROM sensor_readings "
+                    "SELECT water_level, rise_rate, rain_intensity, timestamp FROM sensor_readings "
                     "WHERE device_id=2 ORDER BY timestamp DESC LIMIT 1"
                 )
                 d2 = cursor.fetchone()
@@ -127,13 +148,14 @@ def create_app() -> Flask:
             weather = get_closest_weather()
             next_hour = get_next_hour_weather()
             precip_next_hour = next_hour.get("precipitationIntensity", weather.get("precipitationIntensity", 0))
+            precip_intensity = float(d1.get("rain_intensity", 0.0))
 
             prediction, flood_p, blockage_p, normal_p = compute_prediction(
                 float(d1["water_level"]),
                 float(d2["water_level"]),
                 float(d1["rise_rate"]),
                 float(d2["rise_rate"]),
-                weather.get("precipitationIntensity", 0),
+                precip_intensity,
                 weather.get("precipitationProbability", 0),
                 precip_next_hour,
             )
@@ -142,7 +164,7 @@ def create_app() -> Flask:
                 float(d2["water_level"]),
                 float(d1["rise_rate"]),
                 float(d2["rise_rate"]),
-                weather.get("precipitationIntensity", 0),
+                precip_intensity,
                 weather.get("precipitationProbability", 0),
                 precip_next_hour,
                 prediction,
@@ -168,13 +190,13 @@ def create_app() -> Flask:
                 def latest_device(device_id):
                     if device_id == 1:
                         cursor.execute(
-                            "SELECT device_id, water_level, rise_rate, percentage, mq4_1, mq4_status_1, mq135_1, mq135_status_1, timestamp "
+                            "SELECT device_id, water_level, rise_rate, percentage, rain_intensity, mq4_1, mq4_status_1, mq135_1, mq135_status_1, timestamp "
                             "FROM sensor_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
                             (device_id,),
                         )
                     else:
                         cursor.execute(
-                            "SELECT device_id, water_level, rise_rate, percentage, mq4_2, mq4_status_2, mq135_2, mq135_status_2, timestamp "
+                            "SELECT device_id, water_level, rise_rate, percentage, rain_intensity, mq4_2, mq4_status_2, mq135_2, mq135_status_2, timestamp "
                             "FROM sensor_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
                             (device_id,),
                         )
@@ -189,6 +211,7 @@ def create_app() -> Flask:
                             "water_level": row["water_level"],
                             "rise_rate": row["rise_rate"],
                             "percentage": row["percentage"],
+                            "rain_intensity": row.get("rain_intensity", 0),
                             "mq4": row.get("mq4_1", 0),
                             "mq4_status": row.get("mq4_status_1", "NORMAL"),
                             "mq135": row.get("mq135_1", 0),
@@ -201,6 +224,7 @@ def create_app() -> Flask:
                         "water_level": row["water_level"],
                         "rise_rate": row["rise_rate"],
                         "percentage": row["percentage"],
+                        "rain_intensity": row.get("rain_intensity", 0),
                         "mq4": row.get("mq4_2", 0),
                         "mq4_status": row.get("mq4_status_2", "NORMAL"),
                         "mq135": row.get("mq135_2", 0),
@@ -208,8 +232,27 @@ def create_app() -> Flask:
                         "timestamp": row["timestamp"],
                     }
 
+                def latest_gas(device_id):
+                    cursor.execute(
+                        "SELECT mq4_ppm, mq4_status, mq135_ppm, mq135_status, timestamp "
+                        "FROM gas_readings WHERE device_id=%s ORDER BY timestamp DESC LIMIT 1",
+                        (device_id,),
+                    )
+                    row = serialize_row(cursor.fetchone())
+                    return None if is_stale(row) else row
+
                 d1 = latest_device(1)
                 d2 = latest_device(2)
+                gases = {
+                    "device1": latest_gas(1),
+                    "device2": latest_gas(2),
+                }
+
+                cursor.execute("SELECT device_id, status FROM manhole_cover_status")
+                cover_status = {
+                    f"device{row['device_id']}": row["status"]
+                    for row in cursor.fetchall()
+                }
 
                 if is_stale(d1):
                     d1 = None
@@ -245,6 +288,11 @@ def create_app() -> Flask:
             "status": "ok",
             "device1": d1,
             "device2": d2,
+            "gas_readings": gases,
+            "manhole_cover_status": {
+                "device1": cover_status.get("device1", "UNKNOWN"),
+                "device2": cover_status.get("device2", "UNKNOWN"),
+            },
             "level_difference": level_diff,
             "weather": weather,
             "prediction": pred,
@@ -267,7 +315,7 @@ def create_app() -> Flask:
                 _use_db(cursor)
                 if device_id:
                     cursor.execute(
-                        "SELECT device_id, water_level, rise_rate, percentage, timestamp "
+                        "SELECT device_id, water_level, rise_rate, percentage, rain_intensity, timestamp "
                         "FROM sensor_readings "
                         "WHERE device_id=%s AND timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR) "
                         "ORDER BY timestamp ASC",
@@ -275,7 +323,7 @@ def create_app() -> Flask:
                     )
                 else:
                     cursor.execute(
-                        "SELECT device_id, water_level, rise_rate, percentage, timestamp "
+                        "SELECT device_id, water_level, rise_rate, percentage, rain_intensity, timestamp "
                         "FROM sensor_readings "
                         "WHERE timestamp >= DATE_SUB(NOW(), INTERVAL %s HOUR) "
                         "ORDER BY timestamp ASC",
@@ -316,12 +364,12 @@ def create_app() -> Flask:
 
                 _use_db(cursor)
                 cursor.execute(
-                    "SELECT water_level, rise_rate, timestamp FROM sensor_readings "
+                    "SELECT water_level, rise_rate, rain_intensity, timestamp FROM sensor_readings "
                     "WHERE device_id=1 ORDER BY timestamp DESC LIMIT 1"
                 )
                 d1 = cursor.fetchone()
                 cursor.execute(
-                    "SELECT water_level, rise_rate, timestamp FROM sensor_readings "
+                    "SELECT water_level, rise_rate, rain_intensity, timestamp FROM sensor_readings "
                     "WHERE device_id=2 ORDER BY timestamp DESC LIMIT 1"
                 )
                 d2 = cursor.fetchone()
@@ -343,16 +391,17 @@ def create_app() -> Flask:
 
         wl1, wl2 = float(d1["water_level"]), float(d2["water_level"])
         r1, r2 = float(d1["rise_rate"]), float(d2["rise_rate"])
+        precip_intensity = float(d1.get("rain_intensity", 0.0))
 
         prediction, flood_p, blockage_p, normal_p = compute_prediction(
             wl1, wl2, r1, r2,
-            weather.get("precipitationIntensity", 0),
+            precip_intensity,
             weather.get("precipitationProbability", 0),
             precip_next_hour,
         )
         store_prediction(
             wl1, wl2, r1, r2,
-            weather.get("precipitationIntensity", 0),
+            precip_intensity,
             weather.get("precipitationProbability", 0),
             precip_next_hour,
             prediction, flood_p, blockage_p, normal_p,
@@ -458,7 +507,7 @@ def create_app() -> Flask:
                 from db import _use_db
 
                 _use_db(cursor)
-                for table_name in ("sensor_readings", "predictions", "weather_forecast"):
+                for table_name in ("sensor_readings", "gas_readings", "manhole_cover_status", "predictions", "weather_forecast"):
                     cursor.execute(f"DELETE FROM {table_name}")
                 conn.commit()
                 log.warning("All data reset by user request")

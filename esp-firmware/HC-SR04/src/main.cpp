@@ -71,7 +71,7 @@ const char* password = "Gouda#15";
 // ======================================================
 
 const char* serverURL =
-    "http://10.226.209.237:5000/api/sensor_readings";
+    "http://10.76.184.237:5000/api/sensor_readings";
 
 
 // ======================================================
@@ -95,11 +95,17 @@ WaterLevel waterSensor(
 // GAS SENSOR CONFIGURATION
 // ======================================================
 
-// MQ-4 AO -> ESP32 GPIO35
-#define MQ4_PIN 35
+// MQ-4 AO -> ESP32 GPIO34
+#define MQ4_PIN 34
 
-// MQ-135 AO -> ESP32 GPIO34
-#define MQ135_PIN 34
+// MQ-135 AO -> ESP32 GPIO35
+#define MQ135_PIN 35
+
+// Reed switch: externally pull GPIO26 down; switch connects it to 3.3V
+// when the manhole cover is closed. GPIO26 has no internal pull resistor.
+#define COVER_REED_PIN 26
+
+bool manholeCoverClosed = false;
 
 
 // ------------------------------------------------------
@@ -132,6 +138,34 @@ ToxicGas mq135Sensor(
     MQ135_RL,
     MQ135_RO
 );
+
+
+// ======================================================
+// RAIN GAUGE (DEVICE 1 ONLY)
+// ======================================================
+
+#define REED_PIN 27
+#define MM_PER_TIP 1.05f
+#define DEBOUNCE_TIME 100UL
+
+volatile unsigned long tipCount = 0;
+volatile unsigned long lastTipTime = 0;
+
+unsigned long previousMinute = 0;
+unsigned long previousTipCount = 0;
+float rainIntensity = 0.0f;
+
+
+void IRAM_ATTR reedInterrupt()
+{
+    unsigned long currentTime = millis();
+
+    if (currentTime - lastTipTime >= DEBOUNCE_TIME)
+    {
+        tipCount++;
+        lastTipTime = currentTime;
+    }
+}
 
 
 String classifyMq4Status(float ppm)
@@ -170,7 +204,7 @@ String classifyMq135Status(float ppm)
 
 unsigned long lastSendTime = 0;
 
-const unsigned long sendInterval = 5000;
+const unsigned long sendInterval = 60000;
 
 
 // ======================================================
@@ -194,6 +228,32 @@ void setup()
     // --------------------------------------------------
 
     deviceId = getOrCreateDeviceId();
+
+    pinMode(COVER_REED_PIN, INPUT);
+    manholeCoverClosed = digitalRead(COVER_REED_PIN) == HIGH;
+
+    Serial.print("Manhole cover: ");
+    Serial.println(manholeCoverClosed ? "CLOSED" : "OPEN");
+
+
+    // GPIO 27 is reserved for the rain gauge on device 1.
+    if (deviceId == 1)
+    {
+        pinMode(REED_PIN, INPUT_PULLUP);
+
+        attachInterrupt(
+            digitalPinToInterrupt(REED_PIN),
+            reedInterrupt,
+            FALLING
+        );
+
+        previousMinute = millis();
+        Serial.println("Rain gauge interrupt enabled on GPIO 27.");
+    }
+    else
+    {
+        Serial.println("Rain gauge disabled for this device.");
+    }
 
 
     // --------------------------------------------------
@@ -269,14 +329,37 @@ void loop()
     // Continuously update water sensor
     // --------------------------------------------------
 
-    waterSensor.update();
+    manholeCoverClosed = digitalRead(COVER_REED_PIN) == HIGH;
 
+    waterSensor.update();
 
     unsigned long currentMillis = millis();
 
 
+    if (deviceId == 1 && currentMillis - previousMinute >= 60000UL)
+    {
+        unsigned long currentTipCount = tipCount;
+        unsigned long tipsThisMinute = currentTipCount - previousTipCount;
+        float totalRain = currentTipCount * MM_PER_TIP;
+        float rainLastMinute = tipsThisMinute * MM_PER_TIP;
+        rainIntensity = rainLastMinute * 60.0f;
+
+        Serial.println();
+        Serial.println("Rain gauge report:");
+        Serial.print("Total Rainfall: ");
+        Serial.print(totalRain, 2);
+        Serial.println(" mm");
+        Serial.print("Rain Intensity: ");
+        Serial.print(rainIntensity, 2);
+        Serial.println(" mm/hour");
+
+        previousTipCount = currentTipCount;
+        previousMinute = currentMillis;
+    }
+
+
     // --------------------------------------------------
-    // Send data every 5 seconds
+    // Send data every minute
     // --------------------------------------------------
 
     if (currentMillis - lastSendTime >= sendInterval)
@@ -286,201 +369,76 @@ void loop()
 
         if (WiFi.status() == WL_CONNECTED)
         {
-            // ==================================================
-            // READ WATER LEVEL
-            // ==================================================
-
-            float waterLevel =
-                waterSensor.getWaterLevel();
-
-            float riseRate =
-                waterSensor.getRiseRate();
-
-            float percentage =
-                waterSensor.getPercentageFilled(
-                    BASE_HEIGHT_CM
-                );
-
-
-            // ==================================================
-            // READ MQ-4
-            // ==================================================
-
-            float mq4PPM =
-                mq4Sensor.readPPM();
-
-
-            // ==================================================
-            // READ MQ-135
-            // ==================================================
-
-            float mq135PPM =
-                mq135Sensor.readPPM();
-
-
-            // ==================================================
-            // SERIAL MONITOR
-            // ==================================================
+            String jsonData = "{\"device_id\":" + String(deviceId) +
+                ",\"manhole_cover_status\":\"" +
+                (manholeCoverClosed ? "CLOSED" : "OPEN") + "\"";
 
             Serial.println();
             Serial.println("------------------------------------------");
-
             Serial.print("Device ID: ");
             Serial.println(deviceId);
+            Serial.print("Manhole cover: ");
+            Serial.println(manholeCoverClosed ? "CLOSED" : "OPEN");
 
-
-            Serial.print("Water Level: ");
-            Serial.print(waterLevel, 2);
-            Serial.println(" cm");
-
-
-            Serial.print("Rise Rate: ");
-            Serial.print(riseRate, 4);
-            Serial.println(" cm/min");
-
-
-            Serial.print("Percentage: ");
-            Serial.print(percentage, 2);
-            Serial.println(" %");
-
-
-            Serial.print("MQ-4 Methane: ");
-            Serial.print(mq4PPM, 2);
-            Serial.println(" ppm");
-
-
-            Serial.print("MQ-135: ");
-            Serial.print(mq135PPM, 2);
-            Serial.println(" ppm");
-
-
-            // ==================================================
-            // CREATE JSON
-            // ==================================================
-
-            String jsonData = "{";
-
-            jsonData +=
-                "\"device_id\":" +
-                String(deviceId) +
-                ",";
-
-
-            jsonData +=
-                "\"water_level\":" +
-                String(waterLevel, 2) +
-                ",";
-
-
-            jsonData +=
-                "\"rise_rate\":" +
-                String(riseRate, 4) +
-                ",";
-
-
-            jsonData +=
-                "\"percentage\":" +
-                String(percentage, 2) +
-                ",";
-
+            float waterLevel = waterSensor.getWaterLevel();
+            float riseRate = waterSensor.getRiseRate();
+            float percentage = waterSensor.getPercentageFilled(BASE_HEIGHT_CM);
+            float mq4PPM = mq4Sensor.readPPM();
+            float mq135PPM = mq135Sensor.readPPM();
 
             String mq4Status = classifyMq4Status(mq4PPM);
             String mq135Status = classifyMq135Status(mq135PPM);
 
-            jsonData +=
-                "\"mq4_ppm\":" +
-                String(mq4PPM, 2) +
-                ",";
+            Serial.print("Water Level: ");
+            Serial.print(waterLevel, 2);
+            Serial.println(" cm");
+            Serial.print("Rise Rate: ");
+            Serial.print(riseRate, 4);
+            Serial.println(" cm/min");
+            Serial.print("Percentage: ");
+            Serial.print(percentage, 2);
+            Serial.println(" %");
+            Serial.print("MQ-4 Methane: ");
+            Serial.print(mq4PPM, 2);
+            Serial.println(" ppm");
+            Serial.print("MQ-135: ");
+            Serial.print(mq135PPM, 2);
+            Serial.println(" ppm");
 
-            jsonData +=
-                "\"mq4_status\":\"" +
-                mq4Status +
-                "\",";
-
-            jsonData +=
-                "\"mq135_ppm\":" +
-                String(mq135PPM, 2) +
-                ",";
-
-            jsonData +=
-                "\"mq135_status\":\"" +
-                mq135Status +
-                "\"";
+            jsonData += ",\"water_level\":" + String(waterLevel, 2) +
+                ",\"rise_rate\":" + String(riseRate, 4) +
+                ",\"percentage\":" + String(percentage, 2) +
+                ",\"rain_intensity\":" + String(rainIntensity, 2) +
+                ",\"mq4_ppm\":" + String(mq4PPM, 2) +
+                ",\"mq4_status\":\"" + mq4Status +
+                "\",\"mq135_ppm\":" + String(mq135PPM, 2) +
+                ",\"mq135_status\":\"" + mq135Status + "\"";
 
             jsonData += "}";
 
-
-            // ==================================================
-            // PRINT JSON
-            // ==================================================
-
-            Serial.println();
             Serial.println("JSON DATA:");
-
             Serial.println(jsonData);
 
-
-            // ==================================================
-            // SEND HTTP POST
-            // ==================================================
-
             HTTPClient http;
-
             http.begin(serverURL);
-
-            http.addHeader(
-                "Content-Type",
-                "application/json"
-            );
-
-
-            int httpResponseCode =
-                http.POST(jsonData);
-
-
-            // ==================================================
-            // SERVER RESPONSE
-            // ==================================================
+            http.addHeader("Content-Type", "application/json");
+            int httpResponseCode = http.POST(jsonData);
 
             if (httpResponseCode > 0)
             {
-                Serial.print(
-                    "HTTP Response Code: "
-                );
-
-                Serial.println(
-                    httpResponseCode
-                );
-
-
-                String response =
-                    http.getString();
-
-
-                Serial.print(
-                    "Server Response: "
-                );
-
-                Serial.println(response);
+                Serial.print("HTTP Response Code: ");
+                Serial.println(httpResponseCode);
+                Serial.print("Server Response: ");
+                Serial.println(http.getString());
             }
             else
             {
-                Serial.print(
-                    "HTTP Error: "
-                );
-
-                Serial.println(
-                    httpResponseCode
-                );
+                Serial.print("HTTP Error: ");
+                Serial.println(httpResponseCode);
             }
 
-
             http.end();
-
-
-            Serial.println(
-                "------------------------------------------"
-            );
+            Serial.println("------------------------------------------");
         }
         else
         {

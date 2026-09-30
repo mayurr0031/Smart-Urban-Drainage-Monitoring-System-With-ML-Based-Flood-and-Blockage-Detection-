@@ -97,7 +97,7 @@ void WaterLevel::update() {
     float timeDiff = (currentTime - lastMeasureTime) / 1000.0;
 
     if (timeDiff >= 0.5) {
-        riseRate = (newWaterLevel - previousWaterLevel) / timeDiff;
+        riseRate = ((newWaterLevel - previousWaterLevel) / timeDiff) * 60.0;
 
         if (abs(riseRate) > 50) {
             riseRate = 0;

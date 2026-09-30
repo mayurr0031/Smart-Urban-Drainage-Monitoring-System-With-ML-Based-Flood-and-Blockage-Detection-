@@ -38,7 +38,7 @@ ML_FEATURES = [
     "precipitationIntensity_next_hour",
 ]
 
-STALE_THRESHOLD_SECONDS = 30
+STALE_THRESHOLD_SECONDS = 90
 
 DUMMY_WEATHER = {"precipitationIntensity": 0.0, "precipitationProbability": 0.0, "temperature": 28.0, "humidity": 65.0}
 

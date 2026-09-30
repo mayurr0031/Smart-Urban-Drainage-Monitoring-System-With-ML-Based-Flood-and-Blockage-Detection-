@@ -71,6 +71,7 @@ def init_database():
                 water_level FLOAT        NOT NULL,
                 rise_rate   FLOAT        NOT NULL DEFAULT 0,
                 percentage  FLOAT        NOT NULL DEFAULT 0,
+                rain_intensity FLOAT     NOT NULL DEFAULT 0,
                 mq4_1       FLOAT        NOT NULL DEFAULT 0,
                 mq4_status_1 VARCHAR(20) NOT NULL DEFAULT 'NORMAL',
                 mq135_1     FLOAT        NOT NULL DEFAULT 0,
@@ -108,6 +109,32 @@ def init_database():
             """
         )
 
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS manhole_cover_status (
+                device_id TINYINT PRIMARY KEY,
+                status VARCHAR(10) NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gas_readings (
+                id           INT AUTO_INCREMENT PRIMARY KEY,
+                device_id    TINYINT      NOT NULL,
+                mq4_ppm      FLOAT        NOT NULL DEFAULT 0,
+                mq4_status   VARCHAR(20)  NOT NULL DEFAULT 'NORMAL',
+                mq135_ppm    FLOAT        NOT NULL DEFAULT 0,
+                mq135_status VARCHAR(20)  NOT NULL DEFAULT 'NORMAL',
+                timestamp    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_device_ts (device_id, timestamp)
+            )
+            """
+        )
+
         migrations = [
             ("condition_label", "ALTER TABLE predictions ADD COLUMN condition_label VARCHAR(20) NOT NULL DEFAULT 'NORMAL' AFTER precipitation_probability"),
             ("ml_label", "ALTER TABLE predictions ADD COLUMN ml_label VARCHAR(20) AFTER blockage_probability"),
@@ -130,6 +157,7 @@ def init_database():
                     log.warning(f"Migration skipped ({column}): {exc}")
 
         sensor_migrations = [
+            ("rain_intensity", "ALTER TABLE sensor_readings ADD COLUMN rain_intensity FLOAT NOT NULL DEFAULT 0 AFTER percentage"),
             ("mq4_1", "ALTER TABLE sensor_readings ADD COLUMN mq4_1 FLOAT NOT NULL DEFAULT 0 AFTER percentage"),
             ("mq4_status_1", "ALTER TABLE sensor_readings ADD COLUMN mq4_status_1 VARCHAR(20) NOT NULL DEFAULT 'NORMAL' AFTER mq4_1"),
             ("mq135_1", "ALTER TABLE sensor_readings ADD COLUMN mq135_1 FLOAT NOT NULL DEFAULT 0 AFTER mq4_status_1"),

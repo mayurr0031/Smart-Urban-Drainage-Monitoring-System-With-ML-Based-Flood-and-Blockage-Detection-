@@ -41,7 +41,7 @@ CREATE DATABASE IF NOT EXISTS water_level_monitor
 EXIT;
 ```
 
-> The tables (`sensor_readings`, `predictions`, `weather_data`) are created automatically when you start the Flask server.
+> The tables (`sensor_readings`, `manhole_cover_status`, `predictions`, `weather_forecast`) are created automatically when you start the Flask server.
 
 ---
 
@@ -134,12 +134,13 @@ Note the IP (e.g. `192.168.1.105`).
 ```cpp
 const char* ssid     = "YOUR_WIFI_SSID";
 const char* password = "YOUR_WIFI_PASSWORD";
-const char* serverURL = "http://192.168.1.105:5000/api/water-level";
+const char* serverURL = "http://192.168.1.105:5000/api/sensor_readings";
                                    // ↑ your laptop IP
 ```
 
-3. For **Node 1** set `"device_id": 1` (change line in main.cpp JSON builder)
-4. Flash via PlatformIO:
+3. On first boot, enter device ID `1` for Node 1 or `2` for Node 2 in the serial monitor. The ID is saved in ESP32 preferences.
+4. Wire the manhole reed switch to GPIO39 (VN): use an external 10 kΩ pull-down from GPIO39 to GND, and connect the switch between GPIO39 and 3.3 V so GPIO39 is HIGH when closed. GPIO39 has no internal pull resistor. MQ-135 AO is configured on GPIO35.
+5. Flash via PlatformIO:
 
 ```bash
 cd HC-SR04/
@@ -153,8 +154,8 @@ Connecting to WiFi......
 Connected!
 ESP32 IP: 192.168.1.101
 Sending Data:
-{"device_id":1,"water_level":12.34,"rise_rate":0.0312,"percentage":30.85}
-Response: {"status":"ok","device_id":1}
+{"device_id":1,"manhole_cover_status":"CLOSED","water_level":12.34,"rise_rate":0.0312,"percentage":30.85}
+Response: {"status":"ok","device_id":1,"manhole_cover_status":"CLOSED"}
 ```
 
 ---
@@ -163,14 +164,14 @@ Response: {"status":"ok","device_id":1}
 
 ```bash
 # Send dummy data for device 1
-curl -X POST http://localhost:5000/api/water-level \
+curl -X POST http://localhost:5000/api/sensor_readings \
   -H "Content-Type: application/json" \
-  -d '{"device_id":1,"water_level":15.0,"rise_rate":0.5,"percentage":37.5}'
+  -d '{"device_id":1,"manhole_cover_status":"CLOSED","water_level":15.0,"rise_rate":0.5,"percentage":37.5}'
 
 # Send dummy data for device 2
-curl -X POST http://localhost:5000/api/water-level \
+curl -X POST http://localhost:5000/api/sensor_readings \
   -H "Content-Type: application/json" \
-  -d '{"device_id":2,"water_level":12.0,"rise_rate":0.3,"percentage":30.0}'
+  -d '{"device_id":2,"manhole_cover_status":"CLOSED","water_level":12.0,"rise_rate":0.3,"percentage":30.0}'
 
 # Get latest
 curl http://localhost:5000/api/latest

@@ -234,6 +234,9 @@ header {
 .manhole-detail { display:flex; justify-content:space-between; align-items:end; margin-top:16px; padding-top:12px; border-top:1px solid var(--border); }
 .manhole-detail .detail-value { font-family:var(--mono); font-size:18px; font-weight:700; color:var(--heading); }
 .manhole-detail .detail-label { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--muted); }
+.cover-state.closed { color:var(--normal); }
+.cover-state.open { color:var(--danger); }
+.cover-state.unknown { color:var(--muted); }
 .prediction-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; margin-top:24px; }
 .prediction-card h3 { font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:14px; }
 .prediction-chart { width:100%; height:150px; display:block; }
@@ -322,7 +325,7 @@ header {
         <div class="value"><span id="wl1">—</span><span class="unit">cm</span></div>
         <div class="label">Water Level</div>
         <div class="progress-bar-bg"><div class="progress-bar-fill" id="pct1" style="width:0%"></div></div>
-        <div class="manhole-detail"><div><div class="detail-value" id="mh1-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div class="detail-label">Manhole 1</div></div>
+        <div class="manhole-detail"><div><div class="detail-value" id="mh1-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div><div class="detail-value cover-state unknown" id="cover1">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
         <div class="label" style="margin-top:4px"><span id="pct1-val">—</span>% filled</div>
       </div>
       <div class="metric-card">
@@ -330,7 +333,7 @@ header {
         <div class="value"><span id="wl2">—</span><span class="unit">cm</span></div>
         <div class="label">Water Level</div>
         <div class="progress-bar-bg"><div class="progress-bar-fill" id="pct2" style="width:0%"></div></div>
-        <div class="manhole-detail"><div><div class="detail-value" id="mh2-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div class="detail-label">Manhole 2</div></div>
+        <div class="manhole-detail"><div><div class="detail-value" id="mh2-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div><div class="detail-value cover-state unknown" id="cover2">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
         <div class="label" style="margin-top:4px"><span id="pct2-val">—</span>% filled</div>
       </div>
       <div class="metric-card">
@@ -462,6 +465,18 @@ function updateGas(id, ppm) {
   message.style.color = state.color;
 }
 
+function updateNodeGas(nodeId, reading) {
+  if (!reading) return;
+  [['mq4', 'mq4_ppm', 'mq4_status'], ['mq135', 'mq135_ppm', 'mq135_status']].forEach(([sensor, valueKey, statusKey]) => {
+    const id = `${sensor}-${nodeId}`;
+    const status = reading[statusKey] || 'NORMAL';
+    updateGas(id, reading[valueKey]);
+    $(id).textContent = fmt(reading[valueKey], 2);
+    $(`${id}-status`).textContent = status;
+    $(`${id}-status`).className = 'sensor-status ' + status.toLowerCase().replace(/ /g, '_');
+  });
+}
+
 function setCondition(cond) {
   const card  = $('condition-card');
   const label = $('condition-label');
@@ -500,7 +515,14 @@ async function fetchLatest() {
   try {
     const res = await fetch('/api/latest');
     if (!res.ok) throw new Error(res.status);
-    const { device1: d1, device2: d2, level_difference: diff, weather: w, prediction: p } = await res.json();
+    const { device1: d1, device2: d2, gas_readings: gases = {}, level_difference: diff, weather: w, prediction: p, manhole_cover_status: covers = {} } = await res.json();
+
+    [['cover1', covers.device1], ['cover2', covers.device2]].forEach(([id, status]) => {
+      const cover = $(id);
+      const normalized = (status || 'UNKNOWN').toLowerCase();
+      cover.textContent = normalized.toUpperCase();
+      cover.className = `detail-value cover-state ${normalized}`;
+    });
 
     const now = new Date().toLocaleTimeString();
 
@@ -509,16 +531,8 @@ async function fetchLatest() {
       $('wl1').textContent = fmt(d1.water_level);
       $('rr1').textContent = fmt(d1.rise_rate, 3);
       $('mh1-rate').textContent = fmt(d1.rise_rate, 3);
-      updateGas('mq4-1', d1.mq4);
-      updateGas('mq135-1', d1.mq135);
       $('pct1').style.width = Math.min(d1.percentage, 100) + '%';
       $('pct1-val').textContent = fmt(d1.percentage);
-      $('mq4-1').textContent = fmt(d1.mq4, 2);
-      $('mq135-1').textContent = fmt(d1.mq135, 2);
-      $('mq4-1-status').textContent = d1.mq4_status || 'NORMAL';
-      $('mq135-1-status').textContent = d1.mq135_status || 'NORMAL';
-      $('mq4-1-status').className = 'sensor-status ' + ((d1.mq4_status || 'NORMAL').toLowerCase().replace(/ /g, '_'));
-      $('mq135-1-status').className = 'sensor-status ' + ((d1.mq135_status || 'NORMAL').toLowerCase().replace(/ /g, '_'));
       stats1.peak = Math.max(stats1.peak, d1.water_level);
       stats1.avgRR.push(d1.rise_rate);
       if (stats1.avgRR.length > 20) stats1.avgRR.shift();
@@ -530,18 +544,13 @@ async function fetchLatest() {
       $('wl2').textContent = fmt(d2.water_level);
       $('rr2').textContent = fmt(d2.rise_rate, 3);
       $('mh2-rate').textContent = fmt(d2.rise_rate, 3);
-      updateGas('mq4-2', d2.mq4);
-      updateGas('mq135-2', d2.mq135);
       $('pct2').style.width = Math.min(d2.percentage, 100) + '%';
       $('pct2-val').textContent = fmt(d2.percentage);
-      $('mq4-2').textContent = fmt(d2.mq4, 2);
-      $('mq135-2').textContent = fmt(d2.mq135, 2);
-      $('mq4-2-status').textContent = d2.mq4_status || 'NORMAL';
-      $('mq135-2-status').textContent = d2.mq135_status || 'NORMAL';
-      $('mq4-2-status').className = 'sensor-status ' + ((d2.mq4_status || 'NORMAL').toLowerCase().replace(/ /g, '_'));
-      $('mq135-2-status').className = 'sensor-status ' + ((d2.mq135_status || 'NORMAL').toLowerCase().replace(/ /g, '_'));
       stats2.peak = Math.max(stats2.peak, d2.water_level);
     }
+
+    updateNodeGas(1, gases.device1);
+    updateNodeGas(2, gases.device2);
 
     $('diff').textContent = fmt(diff);
 
