@@ -8,15 +8,6 @@
 		},
 		{
 			"path": "../../.venv"
-		},
-		{
-			"path": "../../assets"
-		},
-		{
-			"path": "../../model_training"
-		},
-		{
-			"path": "../../server"
 		}
 	],
 	"settings": {}

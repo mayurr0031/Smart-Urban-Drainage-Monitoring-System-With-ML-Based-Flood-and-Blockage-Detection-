@@ -7,11 +7,12 @@ class WaterLevel {
 private:
     int triggerPin;
     int echoPin;
-    float baseHeight;  // cm - distance from sensor to container bottom
-    float previousDistance;
-    float riseRate;    // cm/min
+    float baseHeight;
+    float previousWaterLevel;
+    float currentWaterLevel;
+    float riseRate;
     unsigned long lastMeasureTime;
-     float currentWaterLevel;
+    bool hasPreviousMeasurement;
     
 public:
     // Constructor
@@ -32,8 +33,8 @@ public:
     // Get percentage of container filled (0-100%)
     float getPercentageFilled(float containerHeightCm);
     
-    // Perform measurement and update rise rate
-    void update();
+    // Take a filtered measurement and update the cached water level and rise rate.
+    bool update();
 };
 
 #endif

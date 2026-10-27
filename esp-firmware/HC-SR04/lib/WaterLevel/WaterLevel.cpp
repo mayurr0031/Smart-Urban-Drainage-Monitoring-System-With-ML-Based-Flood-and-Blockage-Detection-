@@ -1,73 +1,46 @@
 #include "WaterLevel.h"
 
+namespace {
+constexpr int DISTANCE_SAMPLE_COUNT = 5;
+constexpr int MIN_VALID_SAMPLES = 3;
+constexpr unsigned long SAMPLE_INTERVAL_MS = 60;
+}
+
 WaterLevel::WaterLevel(int trig, int echo, float baseHeightCm)
-    : triggerPin(trig), echoPin(echo), baseHeight(baseHeightCm),
-      previousDistance(baseHeightCm), riseRate(0), lastMeasureTime(0) {}
+    : triggerPin(trig), echoPin(echo),
+      baseHeight(baseHeightCm > 0.0f ? baseHeightCm : 0.0f),
+      previousWaterLevel(0.0f), currentWaterLevel(0.0f), riseRate(0.0f),
+      lastMeasureTime(0), hasPreviousMeasurement(false) {}
 
 void WaterLevel::begin() {
     pinMode(triggerPin, OUTPUT);
     pinMode(echoPin, INPUT);
-    
-    // Stabilize sensor with initial measurements
-    delay(100);
-    for (int i = 0; i < 5; i++) {
-        float dist = measureDistance();
-        if (dist > 0) {
-            previousDistance = dist;
-        }
-        delay(50);
-    }
-    
-    lastMeasureTime = millis();
+    update();
 }
 
 float WaterLevel::measureDistance() {
-    // Ensure trigger pin is low initially
     digitalWrite(triggerPin, LOW);
     delayMicroseconds(2);
-    
-    // Send 10µs pulse on trigger pin
+
     digitalWrite(triggerPin, HIGH);
     delayMicroseconds(10);
     digitalWrite(triggerPin, LOW);
-    
-    // Measure echo pulse duration with 50ms timeout (max ~8.5m)
-    unsigned long pulseDuration = pulseIn(echoPin, HIGH, 50000);
-    
-    // Calculate distance: distance = (time * speed of sound) / 2
-    // Speed of sound = 343 m/s = 0.0343 cm/µs
-    float distance = (pulseDuration * 0.0343) / 2.0;
-    
-    // Validate measurement
-    // Valid range: 2cm to 400cm
-    if (distance < 2.0 || distance > 400.0 || pulseDuration == 0) {
-        // Return previous distance only if it was valid
-        if (previousDistance > 0 && previousDistance < 400.0) {
-            return previousDistance;
-        }
-        return 0;  // Return 0 as fallback for invalid readings
+
+    unsigned long pulseDuration = pulseIn(echoPin, HIGH, 30000);
+    if (pulseDuration == 0) {
+        return 0.0f;
     }
-    
+
+    float distance = (pulseDuration * 0.0343f) / 2.0f;
+    if (distance < 2.0f || distance > 400.0f) {
+        return 0.0f;
+    }
+
     return distance;
 }
 
 float WaterLevel::getWaterLevel() {
-    // Water level = base height - distance from sensor to water surface
-    float distance = measureDistance();
-    
-    // If we got 0 (invalid reading), return previous level
-    if (distance == 0 && previousDistance > 0) {
-        distance = previousDistance;
-    }
-    
-    float waterLevel = baseHeight - distance;
-    
-    // Ensure non-negative water level
-    if (waterLevel < 0) {
-        waterLevel = 0;
-    }
-    
-    return waterLevel;
+    return currentWaterLevel;
 }
 
 float WaterLevel::getRiseRate() {
@@ -75,36 +48,70 @@ float WaterLevel::getRiseRate() {
 }
 
 float WaterLevel::getPercentageFilled(float containerHeightCm) {
-    float waterLevel = getWaterLevel();
-    float percentage = (waterLevel / containerHeightCm) * 100.0;
-    
-    // Clamp to 0-100%
-    if (percentage < 0) percentage = 0;
-    if (percentage > 100) percentage = 100;
-    
+    if (containerHeightCm <= 0.0f) {
+        return 0.0f;
+    }
+
+    float percentage = (currentWaterLevel / containerHeightCm) * 100.0f;
+    if (percentage < 0.0f) percentage = 0.0f;
+    if (percentage > 100.0f) percentage = 100.0f;
     return percentage;
 }
 
-void WaterLevel::update() {
-    unsigned long currentTime = millis();
-    float currentDistance = measureDistance();
+bool WaterLevel::update() {
+    float distances[DISTANCE_SAMPLE_COUNT];
+    int validSampleCount = 0;
 
-    if (currentDistance == 0) return;
-
-    float newWaterLevel = baseHeight - currentDistance;
-    float previousWaterLevel = baseHeight - previousDistance;
-
-    float timeDiff = (currentTime - lastMeasureTime) / 1000.0;
-
-    if (timeDiff >= 0.5) {
-        riseRate = ((newWaterLevel - previousWaterLevel) / timeDiff) * 60.0;
-
-        if (abs(riseRate) > 50) {
-            riseRate = 0;
+    for (int i = 0; i < DISTANCE_SAMPLE_COUNT; ++i) {
+        float distance = measureDistance();
+        if (distance > 0.0f) {
+            distances[validSampleCount++] = distance;
         }
 
-        previousDistance = currentDistance;
-        lastMeasureTime = currentTime;
-        currentWaterLevel = newWaterLevel;  // ✅ store
+        if (i + 1 < DISTANCE_SAMPLE_COUNT) {
+            delay(SAMPLE_INTERVAL_MS);
+        }
     }
+
+    if (validSampleCount < MIN_VALID_SAMPLES) {
+        riseRate = 0.0f;
+        return false;
+    }
+
+    for (int i = 1; i < validSampleCount; ++i) {
+        float value = distances[i];
+        int j = i;
+        while (j > 0 && distances[j - 1] > value) {
+            distances[j] = distances[j - 1];
+            --j;
+        }
+        distances[j] = value;
+    }
+
+    float distance = distances[validSampleCount / 2];
+    if (validSampleCount % 2 == 0) {
+        distance = (distance + distances[validSampleCount / 2 - 1]) / 2.0f;
+    }
+
+    float measuredWaterLevel = baseHeight - distance;
+    if (measuredWaterLevel < 0.0f) measuredWaterLevel = 0.0f;
+    if (measuredWaterLevel > baseHeight) measuredWaterLevel = baseHeight;
+
+    unsigned long measurementTime = millis();
+    if (hasPreviousMeasurement) {
+        unsigned long elapsedMs = measurementTime - lastMeasureTime;
+        if (elapsedMs > 0) {
+            riseRate = (measuredWaterLevel - previousWaterLevel) * 60000.0f / elapsedMs;
+        } else {
+            riseRate = 0.0f;
+        }
+    } else {
+        riseRate = 0.0f;
+        hasPreviousMeasurement = true;
+    }
+
+    currentWaterLevel = measuredWaterLevel;
+    previousWaterLevel = measuredWaterLevel;
+    lastMeasureTime = measurementTime;
+    return true;
 }
