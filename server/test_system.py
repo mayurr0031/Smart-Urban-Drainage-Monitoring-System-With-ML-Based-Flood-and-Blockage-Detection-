@@ -69,7 +69,8 @@ def send(device_id, wl, rr, pct, rain_intensity=0.0, mq4_ppm=150.0, mq135_ppm=15
         tag = "✅" if ok else "❌"
         print(
             f"  {tag} Device {device_id}: WL={wl:.2f}cm  RR={rr:.4f}cm/min  "
-            f"Fill={pct:.2f}%  MQ-4={mq4_ppm:.2f}ppm ({payload['mq4_status']})  "
+            f"Fill={pct:.2f}%  Rain={payload['rain_intensity']:.2f}mm/h  "
+            f"MQ-4={mq4_ppm:.2f}ppm ({payload['mq4_status']})  "
             f"MQ-135={mq135_ppm:.2f}ppm ({payload['mq135_status']})"
         )
         if ok:

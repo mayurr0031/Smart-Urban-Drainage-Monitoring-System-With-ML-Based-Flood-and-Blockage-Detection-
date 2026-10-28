@@ -383,6 +383,11 @@ header {
         <div class="value"><span id="diff">—</span><span class="unit">cm</span></div>
         <div class="label">Between Node 1 &amp; 2</div>
       </div>
+      <div class="metric-card">
+        <div class="device-tag">Rain Gauge · Node 1</div>
+        <div class="value"><span id="precip-intensity">—</span><span class="unit">mm/h</span></div>
+        <div class="label">Rain Intensity</div>
+      </div>
     </div>
   </div>
 
@@ -533,6 +538,7 @@ async function fetchLatest() {
       $('mh1-rate').textContent = fmt(d1.rise_rate, 3);
       $('pct1').style.width = Math.min(d1.percentage, 100) + '%';
       $('pct1-val').textContent = fmt(d1.percentage);
+      $('precip-intensity').textContent = fmt(d1.rain_intensity);
       stats1.peak = Math.max(stats1.peak, d1.water_level);
       stats1.avgRR.push(d1.rise_rate);
       if (stats1.avgRR.length > 20) stats1.avgRR.shift();
