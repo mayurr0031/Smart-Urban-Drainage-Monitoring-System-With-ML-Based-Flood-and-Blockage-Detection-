@@ -135,8 +135,10 @@ The ESP32 sends sensor readings in this format:
 }
 ```
 
-The ESP32 posts once per minute. `rise_rate` is in cm/min and device 1's
-`rain_intensity` is sent to the ML model as `precipitationIntensity`.
+The ESP32 samples and posts sensor data every 15 seconds. The dashboard refreshes
+at the same interval. `rise_rate` is in cm/min and device 1's `rain_intensity`
+is sent to the ML model as `precipitationIntensity`. See
+[MATHEMATICAL_MODEL.md](./MATHEMATICAL_MODEL.md) for sensor and model formulas.
 
 ## Model Training
 

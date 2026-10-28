@@ -44,11 +44,11 @@ def create_app() -> Flask:
 
         if device_id is None:
             return jsonify({"error": "Missing device_id"}), 400
+        if isinstance(device_id, bool) or str(device_id).strip() not in ("1", "2"):
+            return jsonify({"error": "device_id must be 1 or 2"}), 400
+        device_id = int(device_id)
         if cover_status not in ("OPEN", "CLOSED"):
             return jsonify({"error": "manhole_cover_status must be OPEN or CLOSED"}), 400
-        if cover_status == "CLOSED" and water_level is None:
-            return jsonify({"error": "Missing water_level for closed manhole cover"}), 400
-
         mq4_1 = mq135_1 = mq4_2 = mq135_2 = 0.0
         mq4_status_1 = mq135_status_1 = mq4_status_2 = mq135_status_2 = "NORMAL"
 

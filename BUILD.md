@@ -76,19 +76,19 @@ pio device monitor --baud 115200
 # Water Level Measurement System
 # HC-SR04 sensor initialized
 # WiFi Connected!
-# Distance: XX.XX cm | Level: XX.XX cm | Rate: X.XXX cm/s | Fill: XX%
+# Distance: XX.XX cm | Level: XX.XX cm | Rate: X.XXX cm/min | Fill: XX%
 ```
 
 ### Test Server API
 
 ```bash
 # In another terminal, send test data
-curl -X POST http://localhost:5000/api/water-level \
+curl -X POST http://localhost:5000/api/sensor_readings \
   -H "Content-Type: application/json" \
-  -d '{"distance": 30.5, "waterLevel": 9.5, "riseRate": 0.05, "percentage": 9.5, "timestamp": 1000}'
+  -d '{"device_id": 1, "water_level": 9.5, "rise_rate": 0.05, "percentage": 23.75}'
 
 # Should receive:
-# {"status":"success","message":"Data received","readings_count":1}
+# {"status":"ok","device_id":1,"manhole_cover_status":"CLOSED"}
 ```
 
 ### Test Dashboard

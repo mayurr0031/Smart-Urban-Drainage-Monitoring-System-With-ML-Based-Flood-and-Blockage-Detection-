@@ -151,7 +151,7 @@ ToxicGas mq135Sensor(
 volatile unsigned long tipCount = 0;
 volatile unsigned long lastTipTime = 0;
 
-unsigned long previousMinute = 0;
+unsigned long previousRainSample = 0;
 unsigned long previousTipCount = 0;
 float rainIntensity = 0.0f;
 
@@ -204,7 +204,7 @@ String classifyMq135Status(float ppm)
 
 unsigned long lastSendTime = 0;
 
-const unsigned long sendInterval = 60000;
+const unsigned long sendInterval = 15000;
 
 
 // ======================================================
@@ -247,7 +247,7 @@ void setup()
             FALLING
         );
 
-        previousMinute = millis();
+        previousRainSample = millis();
         Serial.println("Rain gauge interrupt enabled on GPIO 27.");
     }
     else
@@ -316,6 +316,12 @@ void setup()
 
     Serial.println();
     Serial.println("System ready.");
+    lastSendTime = millis();
+    if (deviceId == 1)
+    {
+        previousTipCount = tipCount;
+        previousRainSample = lastSendTime;
+    }
 }
 
 
@@ -326,23 +332,21 @@ void setup()
 void loop()
 {
     // --------------------------------------------------
-    // Continuously update water sensor
+    // Update the cover input between scheduled sensor readings
     // --------------------------------------------------
 
     manholeCoverClosed = digitalRead(COVER_REED_PIN) == HIGH;
 
-    waterSensor.update();
-
     unsigned long currentMillis = millis();
 
 
-    if (deviceId == 1 && currentMillis - previousMinute >= 60000UL)
+    if (deviceId == 1 && currentMillis - previousRainSample >= sendInterval)
     {
         unsigned long currentTipCount = tipCount;
-        unsigned long tipsThisMinute = currentTipCount - previousTipCount;
+        unsigned long elapsedMs = currentMillis - previousRainSample;
+        unsigned long tipsThisSample = currentTipCount - previousTipCount;
         float totalRain = currentTipCount * MM_PER_TIP;
-        float rainLastMinute = tipsThisMinute * MM_PER_TIP;
-        rainIntensity = rainLastMinute * 60.0f;
+        rainIntensity = tipsThisSample * MM_PER_TIP * 3600000.0f / elapsedMs;
 
         Serial.println();
         Serial.println("Rain gauge report:");
@@ -354,40 +358,60 @@ void loop()
         Serial.println(" mm/hour");
 
         previousTipCount = currentTipCount;
-        previousMinute = currentMillis;
+        previousRainSample = currentMillis;
     }
 
 
     // --------------------------------------------------
-    // Send data every minute
+    // Send sensor data every 15 seconds
     // --------------------------------------------------
 
     if (currentMillis - lastSendTime >= sendInterval)
     {
         lastSendTime = currentMillis;
 
-
-        if (WiFi.status() == WL_CONNECTED)
+        bool waterLevelValid = waterSensor.update();
+        if (!waterLevelValid)
         {
-            String jsonData = "{\"device_id\":" + String(deviceId) +
-                ",\"manhole_cover_status\":\"" +
-                (manholeCoverClosed ? "CLOSED" : "OPEN") + "\"";
+            Serial.println("Water-level measurement failed; reporting gas readings only.");
+        }
 
-            Serial.println();
-            Serial.println("------------------------------------------");
-            Serial.print("Device ID: ");
-            Serial.println(deviceId);
-            Serial.print("Manhole cover: ");
-            Serial.println(manholeCoverClosed ? "CLOSED" : "OPEN");
+        float mq4PPM = mq4Sensor.readPPM();
+        float mq135PPM = mq135Sensor.readPPM();
+        String mq4Status = classifyMq4Status(mq4PPM);
+        String mq135Status = classifyMq135Status(mq135PPM);
 
+        Serial.println();
+        Serial.println("------------------------------------------");
+        Serial.print("Device ID: ");
+        Serial.println(deviceId);
+        Serial.print("MQ-4 ADC: ");
+        Serial.print(mq4Sensor.getRawADC());
+        Serial.print(" | voltage: ");
+        Serial.print(mq4Sensor.getVoltage(), 3);
+        Serial.print(" V | Rs/Ro: ");
+        Serial.print(mq4Sensor.getRatio(), 3);
+        Serial.print(" | methane: ");
+        Serial.print(mq4PPM, 2);
+        Serial.println(" ppm");
+        Serial.print("MQ-135 ADC: ");
+        Serial.print(mq135Sensor.getRawADC());
+        Serial.print(" | voltage: ");
+        Serial.print(mq135Sensor.getVoltage(), 3);
+        Serial.print(" V | Rs/Ro: ");
+        Serial.print(mq135Sensor.getRatio(), 3);
+        Serial.print(" | ppm: ");
+        Serial.print(mq135PPM, 2);
+        Serial.println(" ppm");
+
+        String jsonData = "{\"device_id\":" + String(deviceId) +
+            ",\"manhole_cover_status\":\"" +
+            (manholeCoverClosed ? "CLOSED" : "OPEN") + "\"";
+        if (waterLevelValid)
+        {
             float waterLevel = waterSensor.getWaterLevel();
             float riseRate = waterSensor.getRiseRate();
             float percentage = waterSensor.getPercentageFilled(BASE_HEIGHT_CM);
-            float mq4PPM = mq4Sensor.readPPM();
-            float mq135PPM = mq135Sensor.readPPM();
-
-            String mq4Status = classifyMq4Status(mq4PPM);
-            String mq135Status = classifyMq135Status(mq135PPM);
 
             Serial.print("Water Level: ");
             Serial.print(waterLevel, 2);
@@ -398,24 +422,21 @@ void loop()
             Serial.print("Percentage: ");
             Serial.print(percentage, 2);
             Serial.println(" %");
-            Serial.print("MQ-4 Methane: ");
-            Serial.print(mq4PPM, 2);
-            Serial.println(" ppm");
-            Serial.print("MQ-135: ");
-            Serial.print(mq135PPM, 2);
-            Serial.println(" ppm");
 
             jsonData += ",\"water_level\":" + String(waterLevel, 2) +
                 ",\"rise_rate\":" + String(riseRate, 4) +
                 ",\"percentage\":" + String(percentage, 2) +
-                ",\"rain_intensity\":" + String(rainIntensity, 2) +
-                ",\"mq4_ppm\":" + String(mq4PPM, 2) +
-                ",\"mq4_status\":\"" + mq4Status +
-                "\",\"mq135_ppm\":" + String(mq135PPM, 2) +
-                ",\"mq135_status\":\"" + mq135Status + "\"";
+                ",\"rain_intensity\":" + String(rainIntensity, 2);
+        }
+        jsonData += ",\"mq4_ppm\":" + String(mq4PPM, 2) +
+            ",\"mq4_status\":\"" + mq4Status +
+            "\",\"mq135_ppm\":" + String(mq135PPM, 2) +
+            ",\"mq135_status\":\"" + mq135Status + "\"";
 
-            jsonData += "}";
+        jsonData += "}";
 
+        if (WiFi.status() == WL_CONNECTED)
+        {
             Serial.println("JSON DATA:");
             Serial.println(jsonData);
 

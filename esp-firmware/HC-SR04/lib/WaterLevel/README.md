@@ -53,7 +53,7 @@ float level = waterLevel.getWaterLevel();
 #### `float getRiseRate()`
 Get the current rate of water level change.
 
-**Returns:** Rise rate in cm/s (positive = rising, negative = falling)
+**Returns:** Rise rate in cm/min (positive = rising, negative = falling)
 
 ```cpp
 float rate = waterLevel.getRiseRate();
@@ -71,13 +71,17 @@ Get the percentage of container that is filled with water.
 float percentage = waterLevel.getPercentageFilled(100.0);
 ```
 
-#### `void update()`
-Update internal measurements and calculate rise rate.
+#### `bool update()`
+Take a filtered measurement and update the cached water level and rise rate.
+Returns `true` when enough valid distance samples are available; returns
+`false` otherwise and leaves the last valid water level unchanged.
 
 Must be called regularly (at least once per measurement cycle) for accurate rise rate calculation.
 
 ```cpp
-waterLevel.update();
+if (waterLevel.update()) {
+    float level = waterLevel.getWaterLevel();
+}
 ```
 
 ## Usage Example
@@ -96,27 +100,24 @@ void setup() {
 }
 
 void loop() {
-    // Update measurements
-    sensor.update();
+    // The first valid measurement establishes the baseline.
+    if (sensor.update()) {
+        float level = sensor.getWaterLevel();
+        float rate = sensor.getRiseRate();
+        float fill = sensor.getPercentageFilled(40.0);
+
+        Serial.print("Level: ");
+        Serial.print(level);
+        Serial.print(" cm | Rate: ");
+        Serial.print(rate);
+        Serial.print(" cm/min | Fill: ");
+        Serial.print(fill);
+        Serial.println("%");
+    } else {
+        Serial.println("Water-level measurement failed.");
+    }
     
-    // Get measurements
-    float distance = sensor.measureDistance();
-    float level = sensor.getWaterLevel();
-    float rate = sensor.getRiseRate();
-    float fill = sensor.getPercentageFilled(100.0);
-    
-    // Print results
-    Serial.print("Distance: ");
-    Serial.print(distance);
-    Serial.print(" cm | Level: ");
-    Serial.print(level);
-    Serial.print(" cm | Rate: ");
-    Serial.print(rate);
-    Serial.print(" cm/s | Fill: ");
-    Serial.print(fill);
-    Serial.println("%");
-    
-    delay(1000);  // Measure once per second
+    delay(15000);  // Match the firmware's 15-second sampling cadence
 }
 ```
 
@@ -144,10 +145,11 @@ Example with base height of 40 cm:
 ### Rise Rate Calculation
 
 ```
-Rise Rate = Δ Water Level / Δ Time
+Rise Rate (cm/min) = 60 × Δ Water Level (cm) / Δ Time (s)
 ```
 
-The library tracks changes between `update()` calls to calculate the rate of change.
+The library tracks changes between valid `update()` calls. The firmware calls
+`update()` once per 15-second sensor-report cycle.
 
 ## Hardware Requirements
 
@@ -215,7 +217,7 @@ void loop() {
 The library includes error checking:
 
 - **Invalid Measurements**: Returns previous valid reading
-- **Out of Range**: Filters measurements >300 cm
+- **Out of Range**: Filters measurements <2 cm or >400 cm
 - **Negative Water Level**: Clamped to 0 cm
 - **Percentage Bounds**: Clamped to 0-100%
 

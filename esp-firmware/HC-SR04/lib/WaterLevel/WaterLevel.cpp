@@ -4,6 +4,7 @@ namespace {
 constexpr int DISTANCE_SAMPLE_COUNT = 5;
 constexpr int MIN_VALID_SAMPLES = 3;
 constexpr unsigned long SAMPLE_INTERVAL_MS = 60;
+constexpr float MILLISECONDS_PER_MINUTE = 60000.0f;
 }
 
 WaterLevel::WaterLevel(int trig, int echo, float baseHeightCm)
@@ -101,7 +102,8 @@ bool WaterLevel::update() {
     if (hasPreviousMeasurement) {
         unsigned long elapsedMs = measurementTime - lastMeasureTime;
         if (elapsedMs > 0) {
-            riseRate = (measuredWaterLevel - previousWaterLevel) * 60000.0f / elapsedMs;
+            riseRate =
+                (measuredWaterLevel - previousWaterLevel) * MILLISECONDS_PER_MINUTE / elapsedMs;
         } else {
             riseRate = 0.0f;
         }

@@ -325,7 +325,7 @@ header {
         <div class="value"><span id="wl1">—</span><span class="unit">cm</span></div>
         <div class="label">Water Level</div>
         <div class="progress-bar-bg"><div class="progress-bar-fill" id="pct1" style="width:0%"></div></div>
-        <div class="manhole-detail"><div><div class="detail-value" id="mh1-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div><div class="detail-value cover-state unknown" id="cover1">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
+        <div class="manhole-detail"><div><div class="detail-value" id="mh1-rate">—</div><div class="detail-label">Rise rate cm/min</div></div><div><div class="detail-value cover-state unknown" id="cover1">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
         <div class="label" style="margin-top:4px"><span id="pct1-val">—</span>% filled</div>
       </div>
       <div class="metric-card">
@@ -333,7 +333,7 @@ header {
         <div class="value"><span id="wl2">—</span><span class="unit">cm</span></div>
         <div class="label">Water Level</div>
         <div class="progress-bar-bg"><div class="progress-bar-fill" id="pct2" style="width:0%"></div></div>
-        <div class="manhole-detail"><div><div class="detail-value" id="mh2-rate">—</div><div class="detail-label">Rise rate cm/s</div></div><div><div class="detail-value cover-state unknown" id="cover2">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
+        <div class="manhole-detail"><div><div class="detail-value" id="mh2-rate">—</div><div class="detail-label">Rise rate cm/min</div></div><div><div class="detail-value cover-state unknown" id="cover2">UNKNOWN</div><div class="detail-label">Cover status</div></div></div>
         <div class="label" style="margin-top:4px"><span id="pct2-val">—</span>% filled</div>
       </div>
       <div class="metric-card">
@@ -341,11 +341,11 @@ header {
         <div class="value" style="display:flex;flex-direction:column;gap:18px;align-items:baseline;">
           <div style="text-align:center;min-width:88px;">
             <div style="font-family:var(--mono);font-size:28px;font-weight:700;"><span id="rr1">—</span></div>
-            <div style="font-size:12px;color:var(--muted);">Node 1 <span class="unit">cm/s</span></div>
+            <div style="font-size:12px;color:var(--muted);">Node 1 <span class="unit">cm/min</span></div>
           </div>
           <div style="text-align:center;min-width:88px;">
             <div style="font-family:var(--mono);font-size:28px;font-weight:700;"><span id="rr2">—</span></div>
-            <div style="font-size:12px;color:var(--muted);">Node 2 <span class="unit">cm/s</span></div>
+            <div style="font-size:12px;color:var(--muted);">Node 2 <span class="unit">cm/min</span></div>
           </div>
         </div>
       </div>
@@ -513,7 +513,7 @@ function setCondition(cond) {
 }
 
 // ─── FETCH LATEST ──────────────────────────────────────────────────────────
-let stats1 = { peak: 0, avgRR: [], count: 0 };
+let stats1 = { peak: 0, avgRR: [], count: 0, lastTimestamp: null };
 let stats2 = { peak: 0 };
 
 async function fetchLatest() {
@@ -540,9 +540,12 @@ async function fetchLatest() {
       $('pct1-val').textContent = fmt(d1.percentage);
       $('precip-intensity').textContent = fmt(d1.rain_intensity);
       stats1.peak = Math.max(stats1.peak, d1.water_level);
-      stats1.avgRR.push(d1.rise_rate);
-      if (stats1.avgRR.length > 20) stats1.avgRR.shift();
-      stats1.count++;
+      if (d1.timestamp !== stats1.lastTimestamp) {
+        stats1.avgRR.push(d1.rise_rate);
+        if (stats1.avgRR.length > 20) stats1.avgRR.shift();
+        stats1.count++;
+        stats1.lastTimestamp = d1.timestamp;
+      }
     }
 
     // Device 2
@@ -582,7 +585,7 @@ async function fetchLatest() {
     $('st-peak1').textContent = fmt(stats1.peak) + ' cm';
     $('st-peak2').textContent = fmt(stats2.peak) + ' cm';
     const avgRR = stats1.avgRR.length ? stats1.avgRR.reduce((a,b)=>a+b,0)/stats1.avgRR.length : 0;
-    $('st-rr1').textContent = fmt(avgRR, 4) + ' cm/s';
+    $('st-rr1').textContent = fmt(avgRR, 4) + ' cm/min';
 
     $('last-update').textContent = 'Updated ' + now;
     $('status-text').textContent = 'Live';
@@ -691,7 +694,7 @@ async function resetData() {
 loadForecast();
 loadPredictionHistory();
 fetchLatest();
-setInterval(fetchLatest, 5000);
+setInterval(fetchLatest, 15000);
 setInterval(loadForecast, 60 * 60 * 1000);
 setInterval(loadPredictionHistory, 60 * 1000);
 </script>
